@@ -1,3 +1,9 @@
+/*
+ * Server implementation.
+ *
+ * Copyright Marko Karjalainen, 2013
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,8 +39,9 @@ void error(const char *msg)
 void removeclient(int socket)
 {
     int i;
+    printf("removeclient: %d\n", socket);
     pthread_mutex_lock(&client_mutex);
-    printf("removeclient: Thread count %d\n", threadcount);
+
     if (threadcount > 0)
     {
         threadcount--;
@@ -54,6 +61,7 @@ void removeclient(int socket)
 
 void thread_error(int fd, const char *msg)
 {
+    printf("thread error: %s\n", msg);
     perror(msg);
     removeclient(fd);
     close(fd);
@@ -64,6 +72,7 @@ void addclient(pthread_t* thread, int socket)
 {
     int i;
     pthread_mutex_lock(&client_mutex);
+    printf("add client: %d\n", socket);
     threadcount++;
     if (threadcount > MAX_CLIENT_COUNT)
     {
@@ -78,10 +87,11 @@ void addclient(pthread_t* thread, int socket)
             clients[i].clientid = threadcount;
             clients[i].thread = *thread;
             clients[i].sockfd = socket;
+            clients[i].user = NULL;
             break;
         }
     }
-    printf("addclient: Thread count %d, socket %d\n", threadcount, socket);
+    printf("add client: client count %d\n", threadcount);
     pthread_mutex_unlock(&client_mutex);
     
 }
@@ -89,12 +99,24 @@ void addclient(pthread_t* thread, int socket)
 void sendmessagefrom(int socket, const char* message)
 {
     int i, n;
+    char buffer[512];
+    
+    if (message == NULL)
+    {
+        printf("send message NULL!\n");
+        return;
+    }
     pthread_mutex_lock(&client_mutex);
     for (i = 0; i < MAX_CLIENT_COUNT; ++i)
     {
         if (clients[i].clientid != 0 && clients[i].sockfd != socket)
         {
-            n = write(clients[i].sockfd, message, strlen(message));
+            memset(buffer, 0, 512);
+            strcat(buffer, clients[i].user);
+            strcat(buffer, ":");
+            strcat(buffer, message);
+            printf("Send to [%d]: %s", clients[i].sockfd, buffer);
+            n = write(clients[i].sockfd, buffer, strlen(buffer));
             if (n < 0)
             {
                 thread_error(clients[i].sockfd, "ERROR writing to socket");
@@ -141,18 +163,24 @@ void* handle_client(void* fd)
     nickLen = 0;
     while (1)
     {
+        printf("handle client %d\n", clientfd);
         memset(buffer, 0, 256);
         n = read(clientfd, buffer, 255);
-        if (n < 0) 
+        if (n <= 0) 
         {
-            thread_error(clientfd, "ERROR reading from socket");
+            thread_error(clientfd, "Client disconnected");
         }
-        token = strtok(buffer, " ");
-        while (token != NULL)
+        if (nickLen == 0)
         {
-            if (strcmp(token, USER))
+            token = strtok(buffer, " ");
+            if (token == NULL)
+                thread_error(clientfd, "ERROR client protocol");
+            if (strcmp(token, USER) == 0)
             {
                 token = strtok(NULL, " ");
+                if (token == NULL)
+                    thread_error(clientfd, "ERROR reading client message");
+                
                 nickLen = strlen(token);
                 if (nickLen > 0 && nickLen <= 256)
                 {
@@ -170,27 +198,10 @@ void* handle_client(void* fd)
                     thread_error(clientfd, "ERROR writing to socket");
                 }
             }
-            else if (nickLen > 0)
-            {
-                if (strcmp(token, MESSAGE))
-                {
-                    token = strtok(NULL, " ");
-                    printf("Received message %s\n", token);
-                    sendmessagefrom(clientfd, token);
-                }
-            
-            }
-            else 
-            {
-                n = write(clientfd, "ERROR", 5);
-                if (n < 0)
-                {
-                    thread_error(clientfd, "ERROR writing to socket");
-                }
-                break;
-            }
-            
-            
+        }
+        else
+        {
+            sendmessagefrom(clientfd, buffer);
         }
      }
      removeclient(clientfd);
@@ -255,6 +266,7 @@ int main(int argc, char *argv[])
         }
         else 
         {
+            printf("new thread created, adding client %d\n", acceptfd);
             addclient(&newclient.thread, acceptfd);
         }
      }
