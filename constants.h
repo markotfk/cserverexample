@@ -4,7 +4,7 @@
  * Copyright Marko Karjalainen, 2013
  */
  
-#define MAX_CLIENT_COUNT 2
+#define MAX_CLIENT_COUNT 32
 #define WELCOME "WELCOME "
 #define WELCOME_LEN 8
 #define USER "USER"

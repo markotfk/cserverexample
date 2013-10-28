@@ -40,7 +40,7 @@ void *messageReader(void *sockfd)
             close(socket);
             error("Connection closed");
         }
-        printf("%s", buffer);
+        printf("\n%s", buffer);
     }
     pthread_exit(NULL);
 }
