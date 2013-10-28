@@ -7,20 +7,22 @@
 #include <netinet/in.h>
 #include <pthread.h>
 
-#define MAX_THREAD_COUNT 2
+#include "constants.h"
 
 typedef struct client
 {
     int clientid;
     pthread_t thread;
     int sockfd;
+    char *user;
 }client; 
+
 
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t max_condition = PTHREAD_COND_INITIALIZER;
 int threadcount;
 int exitVal;
-client clients[MAX_THREAD_COUNT];
+client clients[MAX_CLIENT_COUNT];
 
 void error(const char *msg)
 {
@@ -37,12 +39,12 @@ void removeclient(int socket)
     {
         threadcount--;
     }
-    for (i = 0; i < MAX_THREAD_COUNT; ++i)
+    for (i = 0; i < MAX_CLIENT_COUNT; ++i)
     {
         if (clients[i].sockfd == socket)
         {
-            printf("Removing %d. client with socket %d\n", i, socket);
-            clients[i].clientid = -1;
+            printf("Remove client id %d, socket %d\n", clients[i].clientid, socket);
+            clients[i].clientid = 0;
             break;
         }
     }    
@@ -63,15 +65,15 @@ void addclient(pthread_t* thread, int socket)
     int i;
     pthread_mutex_lock(&client_mutex);
     threadcount++;
-    if (threadcount > MAX_THREAD_COUNT)
+    if (threadcount > MAX_CLIENT_COUNT)
     {
         printf("Waiting for other threads to finish\n");
         pthread_cond_wait(&max_condition, &client_mutex);
         printf("Waiting for other threads done\n");
     }
-    for (i = 0; i < MAX_THREAD_COUNT; ++i)
+    for (i = 0; i < MAX_CLIENT_COUNT; ++i)
     {
-        if (clients[i].clientid == -1)
+        if (clients[i].clientid == 0)
         {
             clients[i].clientid = threadcount;
             clients[i].thread = *thread;
@@ -84,24 +86,112 @@ void addclient(pthread_t* thread, int socket)
     
 }
 
+void sendmessagefrom(int socket, const char* message)
+{
+    int i, n;
+    pthread_mutex_lock(&client_mutex);
+    for (i = 0; i < MAX_CLIENT_COUNT; ++i)
+    {
+        if (clients[i].clientid != 0 && clients[i].sockfd != socket)
+        {
+            n = write(clients[i].sockfd, message, strlen(message));
+            if (n < 0)
+            {
+                thread_error(clients[i].sockfd, "ERROR writing to socket");
+            }
+        }
+    }
+    pthread_mutex_unlock(&client_mutex);
+}
+
+void addusernick(int socket, const char* nick)
+{
+    int i;
+    pthread_mutex_lock(&client_mutex);
+    for (i = 0; i < MAX_CLIENT_COUNT; ++i)
+    {
+        if (clients[i].clientid != 0 && clients[i].sockfd == socket)
+        {
+            if (clients[i].user != NULL)
+            {
+                free(clients[i].user);
+            }
+
+            clients[i].user = malloc(strlen(nick));
+            if (clients[i].user == NULL)
+            {
+                thread_error(socket, "Out of memory");
+            }
+            strcpy(clients[i].user, nick);
+        }
+    }
+    pthread_mutex_unlock(&client_mutex);
+    
+}
+
 void* handle_client(void* fd)
 {
-     int n;
-     int clientfd;
-     char buffer[256];
-     memset(buffer, 0, 256);
-     clientfd = (*(int*)fd);
-     n = read(clientfd, buffer, 255);
-     if (n < 0) 
-     {
-         thread_error(clientfd, "ERROR reading from socket");
-     }
-     printf("Message from client id %d: %s", clientfd, buffer);
-     n = write(clientfd,"I got your message\n",19);
-     
-     if (n < 0) 
-     {
-         thread_error(clientfd, "ERROR writing to socket");
+    int n;
+    int clientfd;
+    int nickLen;
+    char buffer[256];
+    char *token;
+    char usernick[256];
+    clientfd = (*(int*)fd);     
+    nickLen = 0;
+    while (1)
+    {
+        memset(buffer, 0, 256);
+        n = read(clientfd, buffer, 255);
+        if (n < 0) 
+        {
+            thread_error(clientfd, "ERROR reading from socket");
+        }
+        token = strtok(buffer, " ");
+        while (token != NULL)
+        {
+            if (strcmp(token, USER))
+            {
+                token = strtok(NULL, " ");
+                nickLen = strlen(token);
+                if (nickLen > 0 && nickLen <= 256)
+                {
+                    strcpy(usernick, (const char*)token);
+                    addusernick(clientfd, &usernick);
+                    
+                    n = write(clientfd,WELCOME, nickLen + WELCOME_LEN);
+                }
+                else 
+                {
+                    n = write(clientfd, ERROR, ERROR_LEN);
+                }
+                if (n < 0) 
+                {
+                    thread_error(clientfd, "ERROR writing to socket");
+                }
+            }
+            else if (nickLen > 0)
+            {
+                if (strcmp(token, MESSAGE))
+                {
+                    token = strtok(NULL, " ");
+                    printf("Received message %s\n", token);
+                    sendmessagefrom(clientfd, token);
+                }
+            
+            }
+            else 
+            {
+                n = write(clientfd, "ERROR", 5);
+                if (n < 0)
+                {
+                    thread_error(clientfd, "ERROR writing to socket");
+                }
+                break;
+            }
+            
+            
+        }
      }
      removeclient(clientfd);
      close(clientfd);
@@ -120,8 +210,8 @@ int main(int argc, char *argv[])
      if (argc < 2) {
          error("ERROR, no port provided");
      }
-     memset(&newclient, -1, sizeof(struct client));
-     memset(&clients, -1, MAX_THREAD_COUNT*sizeof(struct client));
+     memset(&newclient, 0, sizeof(struct client));
+     memset(&clients, 0, MAX_CLIENT_COUNT*sizeof(struct client));
      
      sockfd = socket(PF_INET, SOCK_STREAM, 0);
      if (sockfd < 0) 
@@ -139,7 +229,7 @@ int main(int argc, char *argv[])
          close(sockfd);
          error("ERROR on binding");
      }
-     if (listen(sockfd, MAX_THREAD_COUNT) < 0) 
+     if (listen(sockfd, MAX_CLIENT_COUNT) < 0) 
      {
          close(sockfd);
          error("Error on listen");
@@ -169,9 +259,13 @@ int main(int argc, char *argv[])
         }
      }
      printf("Exiting server\n");
-     for (i = 0; i < MAX_THREAD_COUNT; ++i)
+     for (i = 0; i < MAX_CLIENT_COUNT; ++i)
      {
-         pthread_join(clients[i].thread, NULL);
+        if (clients[i].user != NULL)
+        {
+            free(clients[i].user);
+        }
+        pthread_join(clients[i].thread, NULL);
      } 
      close(sockfd);
      pthread_cond_destroy(&max_condition);
