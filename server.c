@@ -39,10 +39,40 @@ void error(const char *msg)
     pthread_exit((void*)1);
 }
 
+int getusercount(void)
+{
+    int i, count;
+    
+    count = 0;
+    pthread_mutex_lock(&client_mutex);
+    
+    for (i = 0; i < MAX_CLIENT_COUNT; ++i)
+    {
+        if (clients[i].initialized == 1)
+            ++count;
+    }
+    pthread_mutex_unlock(&client_mutex);
+    return count;
+}
+
+void sendusercount(int socket)
+{
+    int n, loggedUsers;
+    char userCount[8];
+    char message[256];
+    
+    loggedUsers = getusercount();
+    sprintf(userCount, "%d", loggedUsers);
+    strcpy(message, userCount);
+    strcat(message, " Users logged in.");
+    n = write(socket, message, strlen(message));
+    if (n < 0)
+        error("ERROR in write");
+}
+    
 void removeclient(int socket)
 {
     int i;
-    printf("removeclient: %d\n", socket);
     pthread_mutex_lock(&client_mutex);
 
     if (threadcount > 0)
@@ -53,12 +83,14 @@ void removeclient(int socket)
     {
         if (clients[i].initialized == 1 && clients[i].sockfd == socket)
         {
-            printf("Remove client socket %d\n", socket);
             clients[i].initialized = 0;
             clients[i].sockfd = 0;
             close(socket);
             if (clients[i].user != NULL)
+            {
+                printf("Remove client %s\n", clients[i].user);
                 free(clients[i].user);
+            }
             clients[i].user = NULL;
             break;
         }
@@ -95,15 +127,16 @@ void addclient(int socket)
 {
     int i, n;
     pthread_mutex_lock(&client_mutex);
-    printf("add client: %d\n", socket);
     threadcount++;
     if (threadcount > MAX_CLIENT_COUNT)
     {
-        printf("Waiting for other threads to finish\n");
         n = write(socket, SERVER_FULL, SERVER_FULL_LEN);
         if (n < 0)
-           thread_error(socket, "ERROR in write");
-           
+        {
+            pthread_mutex_unlock(&client_mutex);
+            thread_error(socket, "ERROR in write");
+        }
+        printf("Waiting for other client handler threads to finish\n");       
         pthread_cond_wait(&max_condition, &client_mutex);
         printf("Waiting for other threads done\n");
     }
@@ -152,10 +185,10 @@ void sendmessagefrom(int socket, const char* message)
         {
             if (clients[i].initialized == 1 && clients[i].sockfd != socket)
             {
-                printf("Send to [%d]: %s", clients[i].sockfd, buffer);
                 n = write(clients[i].sockfd, buffer, strlen(buffer));
                 if (n < 0)
                 {
+                    pthread_mutex_unlock(&client_mutex);
                     thread_error(clients[i].sockfd, "ERROR writing to socket");
                 }
             }
@@ -167,7 +200,6 @@ void sendmessagefrom(int socket, const char* message)
 void addusernick(int socket, const char* nick)
 {
     int i;
-    printf("add user nick: %s\n", nick);
     pthread_mutex_lock(&client_mutex);
     for (i = 0; i < MAX_CLIENT_COUNT; ++i)
     {
@@ -179,9 +211,12 @@ void addusernick(int socket, const char* nick)
             clients[i].user = malloc(strlen(nick));
             if (clients[i].user == NULL)
             {
+                pthread_mutex_unlock(&client_mutex);
                 thread_error(socket, "Out of memory");
             }
+            printf("Add user %s\n", nick);
             strcpy(clients[i].user, nick);
+            break;
         }
     }
     pthread_mutex_unlock(&client_mutex);
@@ -191,6 +226,7 @@ void addusernick(int socket, const char* nick)
 void* handle_client(void* fd)
 {
     int n;
+    int oldtype;
     int clientfd;
     int nickLen;
     char buffer[256];
@@ -198,7 +234,12 @@ void* handle_client(void* fd)
     char usernick[256];
     clientfd = (*(int*)fd);     
     nickLen = 0;
+    n = pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &oldtype);
+    if (n < 0)
+        thread_error(clientfd, "ERROR in setcanceltype");
+
     addclientthread(clientfd, (pthread_t*)pthread_self());
+    sendusercount(clientfd);
     
     while (1)
     {

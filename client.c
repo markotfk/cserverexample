@@ -16,8 +16,8 @@
 
 #include "constants.h"
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_t thread;
+int readerRunning = 0;
 
 void error(const char *msg)
 {
@@ -31,7 +31,7 @@ void *messageReader(void *sockfd)
     char buffer[256];
     
     socket = (*(int*)sockfd);
-    while (1)
+    while (readerRunning == 1)
     {
         memset(buffer, 0, 256);
         n = read(socket, buffer, 255);
@@ -45,6 +45,14 @@ void *messageReader(void *sockfd)
     pthread_exit(NULL);
 }
 
+void closeReader(int socket)
+{
+    close(socket);
+    readerRunning = 0;
+    pthread_join(thread, NULL);
+}
+    
+    
 int main(int argc, char *argv[])
 {
     int sockfd, portno, n, thread_ret;
@@ -99,7 +107,6 @@ int main(int argc, char *argv[])
     if (n < 0)
         error("ERROR write");
 
-    printf("Connected.\n");
     memset(buffer, 0, 256);
     n = read(sockfd, buffer, 255);
     if (n <= 0)
@@ -107,7 +114,8 @@ int main(int argc, char *argv[])
         close(sockfd);
         error("Connection error");
     }
-    printf("Server replied: %s\n", buffer);
+    printf("Connected. Server replied: %s\n", buffer);
+    readerRunning = 1;
     
     if ((thread_ret = pthread_create(&thread, NULL, messageReader, (void*)&sockfd)))
     {
@@ -123,12 +131,13 @@ int main(int argc, char *argv[])
         n = write(sockfd, buffer, strlen(buffer));
         if (n < 0) 
         {
-            close(sockfd);
+            closeReader(sockfd);
             error("ERROR writing to socket");
         }
     }
+    printf("server: %s, closing...\n", buffer);
+    closeReader(sockfd);
     printf("Bye\n");
-    close(sockfd);
     pthread_exit(NULL);
 }
 
