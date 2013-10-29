@@ -52,6 +52,7 @@ int main(int argc, char *argv[])
     struct hostent *server;
 
     char nick[256];
+    char *userRegister;
     char buffer[256];
     if (argc < 3) {
        fprintf(stderr,"usage %s hostname port\n", argv[0]);
@@ -68,10 +69,22 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    printf("Enter your nick name: ");
-    memset(nick, 0, 256);
-    fgets(nick, 255, stdin);
-
+    do {
+        printf("Enter your nick name: ");
+        memset(nick, 0, 256);
+        fgets(nick, 255, stdin);
+    } 
+    while (strlen(nick) <= 1);
+    
+    if (nick[strlen(nick)-1] == '\n')
+        nick[strlen(nick)-1] = '\0';
+        
+    userRegister = malloc(USERCLIENT_LEN + strlen(nick));
+    if (userRegister == NULL)
+        error("Out of memory");
+    strcpy(userRegister, USERCLIENT);
+    strcat(userRegister, (const char*)&nick);
+    
     memset(&serv_addr, 0, sizeof(serv_addr));
     
     serv_addr.sin_family = AF_INET;
@@ -82,10 +95,11 @@ int main(int argc, char *argv[])
     if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
-    n = write(sockfd, "USER testuser", 13);
+    n = write(sockfd, userRegister, strlen(userRegister));
     if (n < 0)
         error("ERROR write");
 
+    printf("Connected.\n");
     memset(buffer, 0, 256);
     n = read(sockfd, buffer, 255);
     if (n <= 0)
@@ -104,7 +118,7 @@ int main(int argc, char *argv[])
     while (strcmp(ERROR, buffer) != 0)
     {
         memset(buffer, 0, 256);
-        printf("\nEnter Message>\n");
+        printf("\n[%s]", nick);
         fgets(buffer, 255, stdin);
         n = write(sockfd, buffer, strlen(buffer));
         if (n < 0) 
