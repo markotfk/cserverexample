@@ -5,8 +5,6 @@
  */
  
 #define MAX_CLIENT_COUNT 32
-#define WELCOME "WELCOME "
-#define WELCOME_LEN 8
 #define USER "USER"
 #define USER_LEN 4
 #define USERCLIENT "USER "

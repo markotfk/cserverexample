@@ -266,8 +266,6 @@ void* handle_client(void* fd)
                 {
                     strcpy(usernick, (const char*)token);
                     addusernick(clientfd, (const char*)&usernick);
-                    
-                    n = write(clientfd, WELCOME, WELCOME_LEN);
                 }
                 else 
                 {

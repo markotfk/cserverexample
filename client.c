@@ -108,13 +108,7 @@ int main(int argc, char *argv[])
         error("ERROR write");
 
     memset(buffer, 0, 256);
-    n = read(sockfd, buffer, 255);
-    if (n <= 0)
-    {
-        close(sockfd);
-        error("Connection error");
-    }
-    printf("Connected. Server replied: %s\n", buffer);
+    printf("Connected.\n");
     readerRunning = 1;
     
     if ((thread_ret = pthread_create(&thread, NULL, messageReader, (void*)&sockfd)))
