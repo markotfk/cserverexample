@@ -1,0 +1,25 @@
+Welcome stranger!
+This is simple client server chat application
+written in C programming language running on console.
+
+You need to have GCC compiler, make, pthread library installed
+to compile. On Ubuntu you can install these using this command:
+>sudo apt-get install gcc make build-essential
+
+To compile both client and server just run 
+>make
+on root directory. If you want to separately compile
+server or client, change to that subdirectory and run make there.
+
+To run server run:
+>make runserver
+That will run server on port defined in Makefile SERVERPORT.
+You can also go go server directory and run server:
+server>./server <portnumber>
+
+To run client:
+>make runclient
+That will run client connecting localhost on SERVERPORT.
+If you want to connect to other address, you can go
+to client-directory and run:
+client>./client <ip.address.here> <port>
